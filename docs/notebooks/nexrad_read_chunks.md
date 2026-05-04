@@ -79,20 +79,34 @@ except Exception:
     pass
 
 if chunk_paths:
-    print(f"Using live S3 chunks: {len(chunk_paths)} files")
+    print(f"Found {len(chunk_paths)} live S3 chunks")
     for p in chunk_paths[:3]:
         print(f"  {p.split('/')[-1]}")
     print(f"  ... {chunk_paths[-1].split('/')[-1]}")
 else:
-    print("S3 bucket empty or unreachable, using open-radar-data fixture")
+    print("S3 bucket unreachable, using open-radar-data fixture")
 ```
 
 ## Download / load chunk bytes
 
+Real-time S3 chunks age out one at a time, so the most recent volume can
+be missing the start (S) chunk that carries the AR2V volume header.
+`open_nexradlevel2_datatree` raises `ValueError` in that case, so we let
+it validate the listing for us and fall back to the open-radar-data
+fixture when it rejects the bytes.
+
 ```{code-cell}
+all_bytes = None
+
 if chunk_paths:
-    all_bytes = [fs.open(p, "rb").read() for p in chunk_paths]
-else:
+    candidate = [fs.open(p, "rb").read() for p in chunk_paths]
+    try:
+        xd.io.open_nexradlevel2_datatree(candidate)
+        all_bytes = candidate
+    except ValueError as e:
+        print(f"S3 listing rejected: {e}")
+
+if all_bytes is None:
     import tarfile
     from pathlib import Path
 

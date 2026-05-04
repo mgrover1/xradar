@@ -3461,7 +3461,7 @@ class IrisRawFile(IrisRecordFile, IrisIngestHeader):
 
         #  get all ray record numbers and offsets
         # also get data for
-        j = -1
+        j = 0
         for i in range(ray_count):
             if idx is not None:
                 if (i % data_type_count) == idx:

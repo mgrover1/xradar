@@ -380,3 +380,41 @@ def test_open_iris_datatree_optional_groups(iris0_file):
     assert "radar_parameters" in dtree.children
     assert "georeferencing_correction" in dtree.children
     assert "radar_calibration" in dtree.children
+
+
+def test_first_loaded_moment_aligned_with_others(iris0_file):
+    """Regression for openradar/xradar#357.
+
+    The first moment loaded in a sweep takes the on-the-fly path in
+    ``IrisRawFile._get_ray_record_offsets_and_data``. An off-by-one in
+    that path (``j = -1``) caused its first matching ray to be written
+    to ``raw_data[-1]`` (the last row), rotating the whole moment by 1
+    ray. Subsequent moments use a separate cache-hit path and were fine.
+
+    ``iris0_file`` (cor-main) has DB_DBZ as ``data_types[0]`` and no
+    DB_XHDR, so DBZH is the first-loaded user-visible moment. Per-row
+    correlation between DBZH and other moments derived from the same
+    dwell must peak at k=0 (no offset).
+    """
+    dtree = open_iris_datatree(iris0_file)
+    sw = dtree["sweep_0"].to_dataset()
+
+    def best_shift(a, b):
+        m = ~(np.isnan(a) | np.isnan(b))
+        a = np.where(m, a, 0.0)
+        b = np.where(m, b, 0.0)
+        a = a - a.mean()
+        b = b - b.mean()
+        scores = [(((a * np.roll(b, k, axis=0)).sum()), k) for k in range(-3, 4)]
+        return max(scores)[1]
+
+    # Moments physically related to DBZH (reflectivity-like statistics).
+    # VRADH is excluded — velocity correlates poorly with reflectivity and
+    # the noise-driven peak is not informative for alignment.
+    related = [m for m in ("ZDR", "KDP", "PHIDP", "RHOHV") if m in sw.data_vars]
+    assert related, "test fixture must expose at least one DBZH-related moment"
+
+    for moment in related:
+        assert (
+            best_shift(sw["DBZH"].values, sw[moment].values) == 0
+        ), f"DBZH is row-rotated relative to {moment}"
