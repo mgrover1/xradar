@@ -132,15 +132,12 @@ def test_crs_datatree():
     ), "CRS coordinate is missing in DataTree"
 
 
-def test_map_over_sweeps_apply_dummy_function():
+def test_map_over_sweeps_apply_dummy_function(cfradial1_sgp_file):
     """
     Test applying a dummy function to all sweep nodes using map_over_sweeps.
     """
-    # Fetch the sample radar file
-    filename = DATASETS.fetch("sample_sgp_data.nc")
-
     # Open the radar file into a DataTree object
-    dtree = xd.io.open_cfradial1_datatree(filename)
+    dtree = xd.io.open_cfradial1_datatree(cfradial1_sgp_file)
 
     # Define a simple dummy function that adds a constant field to the dataset
     def dummy_function(ds):
@@ -166,15 +163,12 @@ def test_map_over_sweeps_apply_dummy_function():
     assert np.all(np.isclose(non_nan_values, 0))
 
 
-def test_map_over_sweeps_non_sweep_nodes():
+def test_map_over_sweeps_non_sweep_nodes(cfradial1_sgp_file):
     """
     Test that non-sweep nodes remain unchanged when using map_over_sweeps.
     """
-    # Fetch the sample radar file
-    filename = DATASETS.fetch("sample_sgp_data.nc")
-
     # Open the radar file into a DataTree object and add a non-sweep node
-    dtree = xd.io.open_cfradial1_datatree(filename)
+    dtree = xd.io.open_cfradial1_datatree(cfradial1_sgp_file)
     non_sweep_data = xr.Dataset({"non_sweep_data": ("dim", np.arange(10))})
     dtree["non_sweep_node"] = non_sweep_data
 

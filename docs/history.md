@@ -2,6 +2,7 @@
 
 ## Development
 
+* MNT: Add ``cfradial1_sgp_file`` session fixture and refactor 8 tests in ``test_util.py``/``test_accessors.py`` to share it instead of inlining ``DATASETS.fetch("sample_sgp_data.nc")``. Fixture returns the filename so each test opens its own DataTree, avoiding cross-test mutation ({issue}`346`, {pull}`347`) by [@aladinor](https://github.com/aladinor)
 * FIX: IRIS reader rotates the first-loaded moment in each sweep by 1 ray — ``IrisRawFile._get_ray_record_offsets_and_data`` initialised ``j = -1`` so the first matching ray of the first-loaded moment was written to ``raw_data[-1]``; affects files without ``DB_XHDR`` (data-type bit 0) where ``DB_DBT`` becomes the rotated moment ({issue}`357`, {pull}`375`) by [@aladinor](https://github.com/aladinor)
 * DOC: Add projection comparison and cartopy map examples to ``Georeference_TargetCRS`` notebook by [@syedhamidali](https://github.com/syedhamidali)
 * DOC: Add full-form descriptions for all supported radar formats in README.md by [@syedhamidali](https://github.com/syedhamidali)

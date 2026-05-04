@@ -266,10 +266,9 @@ def test_ipol_time2(missing, a1gate, rot):
             dsx.pipe(util.ipol_time, direction=direction)
 
 
-def test_get_sweep_keys():
+def test_get_sweep_keys(cfradial1_sgp_file):
     # Test finding sweep keys
-    filename = DATASETS.fetch("sample_sgp_data.nc")
-    dtree = io.open_cfradial1_datatree(filename)
+    dtree = io.open_cfradial1_datatree(cfradial1_sgp_file)
     # set a fake group
     dtree["sneep_1"] = dtree["sweep_1"]
     keys = util.get_sweep_keys(dtree)
@@ -283,12 +282,9 @@ def test_get_sweep_keys():
     ]
 
 
-def test_apply_to_sweeps():
-    # Fetch the sample radar file
-    filename = DATASETS.fetch("sample_sgp_data.nc")
-
+def test_apply_to_sweeps(cfradial1_sgp_file):
     # Open the radar file into a DataTree object
-    dtree = io.open_cfradial1_datatree(filename)
+    dtree = io.open_cfradial1_datatree(cfradial1_sgp_file)
 
     # Define a simple function to test with apply_to_sweeps
     def dummy_function(ds):
@@ -325,44 +321,41 @@ def test_apply_to_sweeps():
         util.apply_to_sweeps(dtree, error_function)
 
 
-def test_apply_to_sweeps_inherit_false(cfradial1_sgp_dtree):
+def test_apply_to_sweeps_inherit_false(cfradial1_sgp_file):
     """inherit=False prevents root coords from leaking onto sweeps."""
+    dtree = io.open_cfradial1_datatree(cfradial1_sgp_file)
     root_coords = {"latitude", "longitude", "altitude"}
 
     def identity(ds):
         return ds
 
     # Default (inherit="all_coords"): root coords appear on sweeps
-    result_default = util.apply_to_sweeps(cfradial1_sgp_dtree, identity)
+    result_default = util.apply_to_sweeps(dtree, identity)
     sweep_ds = result_default["sweep_0"].to_dataset(inherit=False)
     inherited = root_coords & set(sweep_ds.coords)
     assert inherited, "Default should inherit root coords"
 
     # inherit=False: root coords stay on root only
-    result_no_inherit = util.apply_to_sweeps(
-        cfradial1_sgp_dtree, identity, inherit=False
-    )
+    result_no_inherit = util.apply_to_sweeps(dtree, identity, inherit=False)
     sweep_ds = result_no_inherit["sweep_0"].to_dataset(inherit=False)
     leaked = root_coords & (set(sweep_ds.coords) | set(sweep_ds.data_vars))
     assert not leaked, f"inherit=False should not leak root coords: {leaked}"
 
 
-def test_apply_to_sweeps_inherit_via_map_over_sweeps(cfradial1_sgp_dtree):
+def test_apply_to_sweeps_inherit_via_map_over_sweeps(cfradial1_sgp_file):
     """inherit parameter works through map_over_sweeps accessor."""
+    dtree = io.open_cfradial1_datatree(cfradial1_sgp_file)
     root_coords = {"latitude", "longitude", "altitude"}
 
-    result = cfradial1_sgp_dtree.xradar.map_over_sweeps(lambda ds: ds, inherit=False)
+    result = dtree.xradar.map_over_sweeps(lambda ds: ds, inherit=False)
     sweep_ds = result["sweep_0"].to_dataset(inherit=False)
     leaked = root_coords & (set(sweep_ds.coords) | set(sweep_ds.data_vars))
     assert not leaked, f"inherit=False via accessor should not leak: {leaked}"
 
 
-def test_apply_to_volume():
-    # Fetch the sample radar file
-    filename = DATASETS.fetch("sample_sgp_data.nc")
-
+def test_apply_to_volume(cfradial1_sgp_file):
     # Open the radar file into a DataTree object
-    dtree = io.open_cfradial1_datatree(filename)
+    dtree = io.open_cfradial1_datatree(cfradial1_sgp_file)
 
     # Define a simple function to test with apply_to_volume
     def dummy_function(ds):
@@ -427,15 +420,12 @@ def test_apply_to_volume():
         util.apply_to_volume(dtree, error_function)
 
 
-def test_map_over_sweeps_decorator_dummy_function():
+def test_map_over_sweeps_decorator_dummy_function(cfradial1_sgp_file):
     """
     Test applying a dummy function to all sweep nodes using the map_over_sweeps decorator.
     """
-    # Fetch the sample radar file
-    filename = DATASETS.fetch("sample_sgp_data.nc")
-
     # Open the radar file into a DataTree object
-    dtree = xd.io.open_cfradial1_datatree(filename)
+    dtree = xd.io.open_cfradial1_datatree(cfradial1_sgp_file)
 
     # Use the decorator on the dummy function
     @xd.map_over_sweeps

@@ -14,11 +14,8 @@ def file_or_filelike(request):
 
 
 @pytest.fixture(scope="session")
-def cfradial1_sgp_dtree():
-    import xradar as xd
-
-    filename = DATASETS.fetch("sample_sgp_data.nc")
-    return xd.io.open_cfradial1_datatree(filename)
+def cfradial1_sgp_file():
+    return DATASETS.fetch("sample_sgp_data.nc")
 
 
 @pytest.fixture(scope="session")
