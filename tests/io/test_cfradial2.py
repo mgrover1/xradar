@@ -8,6 +8,7 @@ import xarray as xr
 
 import xradar as xd
 from xradar.io.backends import cfradial2 as cf2
+from xradar.io.export import cfradial2 as export_cf2
 
 
 def _write_institutional_cfradial2(outfile):
@@ -136,6 +137,37 @@ def test_open_cfradial2_normalizes_common_aliases(temp_file):
 def test_open_cfradial2_invalid_path():
     with pytest.raises(FileNotFoundError):
         xd.io.open_cfradial2_datatree("missing-cfradial2-file.nc")
+
+
+@pytest.mark.parametrize(
+    ("available", "expected_engine"),
+    [
+        ("netCDF4", "netcdf4"),
+        ("h5netcdf", "h5netcdf"),
+    ],
+)
+def test_to_cfradial2_selects_default_engine(
+    monkeypatch, tmp_path, available, expected_engine
+):
+    # build a tiny DataTree with the minimum structure needed for export, and a root history attribute since export appends to it
+    dtree = xr.DataTree.from_dict({"/": xr.Dataset(attrs={"history": ""})})
+
+    # monkeypatch has_import to simulate different available engines, and ensure that the expected one is selected when engine=None
+    monkeypatch.setattr(export_cf2, "has_import", lambda name: name == available)
+
+    # monkeypatch DataTree.to_netcdf to avoid writing a real file and let the test intercept the `engine` argument
+    seen = {}
+
+    def _capture_to_netcdf(self, filename, engine=None, **kwargs):
+        seen["engine"] = engine
+
+    monkeypatch.setattr(xr.DataTree, "to_netcdf", _capture_to_netcdf, raising=True)
+
+    # call to_cfradial2 with engine=None, which should trigger the default engine selection logic
+    export_cf2.to_cfradial2(dtree, tmp_path / "out.nc", engine=None)
+
+    # does the intercepted call to to_netcdf have the expected engine ?
+    assert seen["engine"] == expected_engine
 
 
 @pytest.mark.parametrize(

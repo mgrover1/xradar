@@ -58,9 +58,9 @@ def to_cfradial2(dtree, filename, engine=None, timestep=None):
     """
     if engine is None:
         if has_import("netCDF4"):
-            engine == "netcdf4"
+            engine = "netcdf4"
         elif has_import("h5netcdf"):
-            engine == "h5netcdf"
+            engine = "h5netcdf"
         else:
             raise ImportError(
                 "xradar: ``netCDF4`` or ``h5netcdf`` needed to perform this operation."
