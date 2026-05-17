@@ -2,6 +2,7 @@
 
 ## Development
 
+* FIX: ``open_nexradlevel2_datatree`` decodes volumes with interior sweep-index gaps end-to-end — translate sweep label → compact position in ``NexradLevel2Store.open_store_coordinates`` so the per-sweep entrypoint stops positionally indexing the compacted ``msg_31_header`` (follow-up to {pull}`362`) ({issue}`366`, {pull}`374`) by [@aladinor](https://github.com/aladinor)
 * FIX: ensure `to_cfradial2` correctly selects the default storage engine when none is provided, ({pull}`378`) by [@chfer](https://github.com/chfer)
 * MNT: Add ``cfradial1_sgp_file`` session fixture and refactor 8 tests in ``test_util.py``/``test_accessors.py`` to share it instead of inlining ``DATASETS.fetch("sample_sgp_data.nc")``. Fixture returns the filename so each test opens its own DataTree, avoiding cross-test mutation ({issue}`346`, {pull}`347`) by [@aladinor](https://github.com/aladinor)
 * FIX: IRIS reader rotates the first-loaded moment in each sweep by 1 ray — ``IrisRawFile._get_ray_record_offsets_and_data`` initialised ``j = -1`` so the first matching ray of the first-loaded moment was written to ``raw_data[-1]``; affects files without ``DB_XHDR`` (data-type bit 0) where ``DB_DBT`` becomes the rotated moment ({issue}`357`, {pull}`375`) by [@aladinor](https://github.com/aladinor)
