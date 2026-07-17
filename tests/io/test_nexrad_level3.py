@@ -72,7 +72,16 @@ def _xdr_string(value):
     return struct.pack(">I", len(raw)) + raw.ljust(padded, b"\x00")
 
 
-def _generic_packet28(nradials, nbins, data, first_gate=125.0, gate_width=250.0):
+def _generic_packet28(
+    nradials,
+    nbins,
+    data,
+    first_gate=125.0,
+    gate_width=250.0,
+    component_code=1,
+    parameters=None,
+    ncomponents=1,
+):
     xdr = _xdr_string("DPR")
     xdr += _xdr_string("Digital Inst Precip Rate")
     xdr += struct.pack(">i", 176)
@@ -91,10 +100,17 @@ def _generic_packet28(nradials, nbins, data, first_gate=125.0, gate_width=250.0)
     xdr += struct.pack(">i", 0)
     xdr += struct.pack(">i", 0)
     xdr += struct.pack(">i", 0)
-    # parameters: count 0 + garbage pointer
-    xdr += struct.pack(">2i", 0, 0)
-    # components: count 1 + garbage pointer + component code 1 (radial)
-    xdr += struct.pack(">3i", 1, 0, 1)
+    if parameters:
+        xdr += struct.pack(">2i", len(parameters), 0)
+        for i, (key, value) in enumerate(parameters):
+            xdr += _xdr_string(key) + _xdr_string(value)
+            if i < len(parameters) - 1:
+                xdr += struct.pack(">i", 0)
+    else:
+        # parameters: count 0 + garbage pointer
+        xdr += struct.pack(">2i", 0, 0)
+    # components: count + garbage pointer + first component code
+    xdr += struct.pack(">3i", ncomponents, 0, component_code)
     xdr += _xdr_string("Radial")
     xdr += struct.pack(">2f", gate_width, first_gate)
     xdr += struct.pack(">2i", 0, 0)  # component parameters: none
@@ -106,6 +122,12 @@ def _generic_packet28(nradials, nbins, data, first_gate=125.0, gate_width=250.0)
         xdr += _xdr_string("")
         xdr += struct.pack(">I", nbins)
         xdr += struct.pack(f">{nbins}i", *[int(v) for v in data[i]])
+    for _ in range(ncomponents - 1):
+        xdr += struct.pack(">2i", 0, 1)  # list pointer + next component code
+        xdr += _xdr_string("Radial")
+        xdr += struct.pack(">2f", gate_width, first_gate)
+        xdr += struct.pack(">2i", 0, 0)
+        xdr += struct.pack(">i", 0)  # zero radials in the extra component
     return struct.pack(">2hi", 28, 0, len(xdr)) + xdr
 
 
@@ -571,6 +593,205 @@ class TestDatatree:
     def test_empty_list_rejected(self):
         with pytest.raises(ValueError, match="at least one file"):
             open_nexradlevel3_datatree([])
+
+
+def _mutate(buf, offset, data):
+    """Overwrite bytes at a fixed offset (header fields have fixed positions
+    when the builder's text header carries no padding)."""
+    return buf[:offset] + data + buf[offset + len(data) :]
+
+
+class TestMalformedAndEdges:
+    # absolute offsets in a pad-free synthetic file:
+    # PDB divider 48, latitude 50, product_code 60, uncompressed size 132,
+    # symbology offset 138, symbology divider 150, packet code 166,
+    # packet nbins 170
+
+    def test_pdb_divider_invalid(self):
+        buf = _mutate(build_level3_file(), 48, struct.pack(">h", 0))
+        with pytest.raises(ValueError, match="divider"):
+            NEXRADLevel3File(io.BytesIO(buf))
+
+    def test_product_code_mismatch_warns(self):
+        buf = _mutate(build_level3_file(), 60, struct.pack(">h", 154))
+        with pytest.warns(UserWarning, match="disagree"):
+            NEXRADLevel3File(io.BytesIO(buf))
+
+    def test_site_out_of_bounds_warns(self):
+        buf = _mutate(build_level3_file(), 50, struct.pack(">i", 95000000))
+        with pytest.warns(UserWarning, match="out of bounds"):
+            NEXRADLevel3File(io.BytesIO(buf))
+
+    def test_bad_symbology_header_warns(self):
+        buf = _mutate(build_level3_file(), 150, struct.pack(">h", 0))
+        with pytest.warns(UserWarning, match="symbology block header"):
+            NEXRADLevel3File(io.BytesIO(buf))
+
+    def test_unsupported_packet_code_raises(self):
+        buf = _mutate(build_level3_file(), 166, struct.pack(">h", 6))
+        with pytest.raises(NotImplementedError, match="packet code 6"):
+            NEXRADLevel3File(io.BytesIO(buf))
+
+    def test_uncompressed_size_mismatch_warns(self):
+        buf = _mutate(build_level3_file(compress=True), 132, struct.pack(">I", 7))
+        with pytest.warns(UserWarning, match="does not match"):
+            NEXRADLevel3File(io.BytesIO(buf))
+
+    def test_symbology_offset_override(self):
+        # move the symbology block 4 bytes later and point the PDB at it
+        buf = build_level3_file()
+        moved = buf[:150] + b"\x00" * 4 + buf[150:]
+        moved = _mutate(moved, 138, struct.pack(">i", 62))
+        f = NEXRADLevel3File(io.BytesIO(moved))
+        assert f.raw_data.shape == (4, 8)
+
+    def test_packet16_nbins_from_first_radial_nbytes(self):
+        # header claims 10 bins; the per-radial byte count (8) wins
+        buf = _mutate(build_level3_file(), 170, struct.pack(">h", 10))
+        f = NEXRADLevel3File(io.BytesIO(buf))
+        assert f.raw_data.shape == (4, 8)
+
+    def test_packet16_ragged_radials(self):
+        packet = struct.pack(">7h", 16, 0, 8, 256, 280, 1000, 2)
+        packet += struct.pack(">3h", 8, 0, 5) + bytes(range(8))
+        packet += struct.pack(">3h", 6, 900, 5) + bytes(range(6))
+        f = NEXRADLevel3File(io.BytesIO(build_level3_file(packet=packet)))
+        assert f.raw_data.shape == (2, 8)
+        np.testing.assert_array_equal(f.raw_data[1], [0, 1, 2, 3, 4, 5, 0, 0])
+        assert f.get_azimuth()[1] == pytest.approx(90.0)
+
+    def test_af1f_bad_run_sum_raises(self):
+        rle = [bytes([0x11, 0x11])] * 2  # expands to 2 bins, header says 6
+        buf = build_level3_file(msg_code=19, packet=_radial_packet_af1f(2, 6, rle))
+        with pytest.raises(ValueError, match="expand"):
+            NEXRADLevel3File(io.BytesIO(buf))
+
+    def test_truncated_xdr_raises(self):
+        data = np.tile(np.array([1, 2], dtype="u2"), (2, 1))
+        packet = _generic_packet28(2, 2, data)
+        buf = build_level3_file(msg_code=176, packet=packet[: len(packet) - 12])
+        with pytest.raises(ValueError, match="XDR"):
+            NEXRADLevel3File(io.BytesIO(buf))
+
+    def test_xdr_unknown_component_raises(self):
+        data = np.tile(np.array([1, 2], dtype="u2"), (2, 1))
+        packet = _generic_packet28(2, 2, data, component_code=4)
+        buf = build_level3_file(msg_code=176, packet=packet)
+        with pytest.raises(NotImplementedError, match="XDR component"):
+            NEXRADLevel3File(io.BytesIO(buf))
+
+    def test_xdr_parameters_parsed(self):
+        data = np.tile(np.array([1, 2], dtype="u2"), (2, 1))
+        packet = _generic_packet28(
+            2, 2, data, parameters=[("lag", "1"), ("mode", "precip")]
+        )
+        buf = build_level3_file(msg_code=176, packet=packet)
+        f = NEXRADLevel3File(io.BytesIO(buf))
+        assert f.gen_data_pack["parameters"] == [("lag", "1"), ("mode", "precip")]
+
+    def test_xdr_single_parameter_collapses(self):
+        data = np.tile(np.array([1, 2], dtype="u2"), (2, 1))
+        packet = _generic_packet28(2, 2, data, parameters=[("lag", "1")])
+        buf = build_level3_file(msg_code=176, packet=packet)
+        f = NEXRADLevel3File(io.BytesIO(buf))
+        assert f.gen_data_pack["parameters"] == ("lag", "1")
+
+    def test_xdr_multiple_components(self):
+        from xradar.io.backends.nexrad_level3 import _Level3XDRParser
+
+        data = np.tile(np.array([1, 2], dtype="u2"), (2, 1))
+        packet = _generic_packet28(2, 2, data, ncomponents=2)
+        xdr = _Level3XDRParser(packet[8:])()
+        assert len(xdr["components"]) == 2
+        assert len(xdr["components"][0].radials) == 2
+
+    def test_context_manager(self):
+        with NEXRADLevel3File(build_level3_file()) as f:
+            assert f.raw_data.shape == (4, 8)
+
+    def test_surface_product_range_and_elevation(self):
+        raw = np.tile(np.array([0, 1, 50], dtype="u1"), (4, 1))
+        buf = build_level3_file(
+            msg_code=170,
+            packet=_radial_packet16(4, 3, raw),
+            threshold=_flag_threshold(2.0, 0.0, leading=1),
+        )
+        f = NEXRADLevel3File(io.BytesIO(buf))
+        assert f.get_elevation() == 0.0
+        rng = f.get_range()
+        # bin_size is None for surface products: packet range scale is exact
+        assert rng[1] - rng[0] == pytest.approx(1000.0)
+
+    def test_class_product_has_no_scale_offset(self):
+        raw = np.tile(np.array([0, 10], dtype="u1"), (4, 1))
+        buf = build_level3_file(msg_code=165, packet=_radial_packet16(4, 2, raw))
+        f = NEXRADLevel3File(io.BytesIO(buf))
+        assert f.get_scale_offset() is None
+
+    def test_instrument_name_fallback(self, tmp_path):
+        buf = _mutate(build_level3_file(), 7, b"K LT ")
+        path = tmp_path / "weird_header"
+        path.write_bytes(buf)
+        ds = xr.open_dataset(str(path), engine="nexradlevel3")
+        assert "instrument_name" not in ds.attrs
+
+    def test_range_folded_mask_variable(self, tmp_path):
+        raw = np.tile(np.array([0, 1, 100], dtype="u1"), (4, 1))
+        path = tmp_path / "rf_file"
+        path.write_bytes(
+            build_level3_file(msg_code=153, packet=_radial_packet16(4, 3, raw))
+        )
+        ds = xr.open_dataset(str(path), engine="nexradlevel3")
+        assert "DBZH_range_folded" in ds.data_vars
+        assert ds["DBZH_range_folded"].values[:, 1].all()
+        assert "range-folded" in ds["DBZH"].attrs["comment"]
+
+    def test_hclass_flag_attrs(self, tmp_path):
+        raw = np.tile(np.array([0, 60], dtype="u1"), (4, 1))
+        path = tmp_path / "hclass_file"
+        path.write_bytes(
+            build_level3_file(msg_code=165, packet=_radial_packet16(4, 2, raw))
+        )
+        ds = xr.open_dataset(str(path), engine="nexradlevel3")
+        assert ds["HCLASS"].attrs["flag_values"][0] == 10
+        assert "biological" in ds["HCLASS"].attrs["flag_meanings"]
+
+    def test_mask_and_scale_false_float_product(self, tmp_path):
+        raw = np.tile(np.array([0, 1, 130], dtype="u1"), (4, 1))
+        path = tmp_path / "zdr_raw"
+        path.write_bytes(
+            build_level3_file(
+                msg_code=159,
+                packet=_radial_packet16(4, 3, raw),
+                threshold=_flag_threshold(
+                    16.0, 128.0, max_val=255, leading=2, trailing=1
+                ),
+            )
+        )
+        ds = xr.open_dataset(str(path), engine="nexradlevel3", mask_and_scale=False)
+        attrs = ds["ZDR"].attrs
+        assert attrs["valid_min"] == 2
+        assert attrs["valid_max"] == 254
+        assert attrs["range_folded_raw_value"] == 1
+
+    def test_reindex_angle_synthetic(self, tmp_path):
+        path = tmp_path / "reindex_file"
+        path.write_bytes(build_level3_file())
+        ds = xr.open_dataset(
+            str(path),
+            engine="nexradlevel3",
+            reindex_angle=dict(
+                start_angle=0, stop_angle=360, angle_res=90.0, direction=1
+            ),
+        )
+        assert ds.sizes["azimuth"] == 4
+        assert not np.isnat(ds["time"].values).any()
+
+    def test_drop_variables(self, tmp_path):
+        path = tmp_path / "drop_file"
+        path.write_bytes(build_level3_file())
+        ds = xr.open_dataset(str(path), engine="nexradlevel3", drop_variables=["DBZH"])
+        assert "DBZH" not in ds.data_vars
 
 
 class TestRealFiles:

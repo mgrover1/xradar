@@ -267,11 +267,6 @@ SUPPORTED_PACKET_CODES = [16, AF1F, 28]
 OPERATIONAL_MODES = {0: "maintenance", 1: "clear-air", 2: "precipitation"}
 
 
-def _structure_size(structure):
-    """Return the size of a structure in bytes."""
-    return struct.calcsize(">" + "".join([fmt for _, fmt in structure]))
-
-
 def _unpack_from_buf(buf, pos, structure):
     """Unpack a big-endian structure from a buffer at the given position."""
     fmt = ">" + "".join([f for _, f in structure])
@@ -320,10 +315,6 @@ class _XDRUnpacker:
         value = self._data[self._pos : self._pos + nbytes]
         self._pos += padded
         return value.decode("ascii", errors="replace")
-
-    def unpack_array(self, unpack_item):
-        nitems = self.unpack_uint()
-        return [unpack_item() for _ in range(nitems)]
 
     def unpack_int_array(self):
         """Bulk-decode an XDR int array (vectorized fast path)."""
