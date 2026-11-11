@@ -63,6 +63,16 @@ dtree = xd.io.open_nexradlevel2_datatree(filename)
 dtree = xd.io.open_nexradlevel2_datatree(filename, optional_groups=True)
 ```
 
+The groups hold one set of values. If the sweeps of a file disagree about a value
+(e.g. the calibration or the noise level of each cut), that value is left out of
+the group and a warning lists it, so the group only has values which are the same
+for all sweeps. To get the values of one sweep, select that sweep:
+
+```python
+# radar_calibration with the values of sweep_4
+dtree = xd.open_datatree(filename, sweep=4, optional_groups=True)
+```
+
 ## CfRadial1
 
 ### CfRadial1BackendEntrypoint
@@ -179,6 +189,20 @@ private helper functions are used to conveniently access data and
 metadata. Finally, the xarray machinery returns a {py:class}`xarray:xarray.Dataset`
 with wanted group (eg. ``0``). Depending on the used backend kwargs several
 more functions are applied on that {py:class}`xarray:xarray.Dataset`.
+
+Each sweep carries the ``nyquist_velocity`` (m s-1) and ``unambiguous_range``
+(meters) of the elevation cut, read from the radial data block (MSG_31) or the
+digital radar data header (MSG_1).
+
+The special moment codes below threshold (``0``) and range folded (``1``) are
+decoded to ``NaN`` with ``mask_and_scale=True`` (default). To tell them apart,
+open the data with ``mask_and_scale=False`` (globally or per variable, e.g.
+``mask_and_scale={"VRADH": False}``) and check the raw codes:
+
+```python
+raw = xr.open_dataset(filename, engine="nexradlevel2", group="sweep_1", mask_and_scale=False)
+range_folded = raw.VRADH == 1
+```
 
 ### open_nexradlevel2_datatree
 
@@ -383,7 +407,7 @@ for files in xd.io.group_imd_files("/data/imd"):
 
 # Or load all volumes into a single tree
 tree = xd.io.open_imd_volumes("/data/imd")
-tree["vcp_00/sweep_0"].ds["DBZH"]
+tree["vcp_00/sweep_0"].dataset["DBZH"]
 ```
 
 ## Universal Format (UF))

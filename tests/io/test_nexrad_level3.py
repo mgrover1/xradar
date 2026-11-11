@@ -965,17 +965,16 @@ class TestRealFiles:
     """
 
     @pytest.fixture
-    def real_file(self, request):
+    def real_file(self, request, file_store):
         import os
 
         name = request.param
         local_dir = os.environ.get("XRADAR_L3_TEST_DATA")
         if local_dir and os.path.exists(os.path.join(local_dir, name)):
             return os.path.join(local_dir, name)
-        from open_radar_data import DATASETS
 
         try:
-            return DATASETS.fetch(name)
+            return file_store.fetch(name)
         except ValueError as err:
             if "not in the registry" in str(err) or "doesn't exist" in str(err):
                 pytest.skip(f"Level 3 sample {name} not in open-radar-data yet")
