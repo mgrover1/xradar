@@ -105,17 +105,20 @@ def remove_duplicate_rays(ds):
     Returns
     -------
     ds : xarray.Dataset
-        Dataset with duplicate rays removed
+        Dataset with duplicate rays removed. The first ray of each angle is kept
+        and the rays stay in their order. Rays with a NaN angle are kept.
     """
     first_angle = get_first_angle(ds)
 
-    _, idx = np.unique(ds[first_angle], return_index=True)
+    # np.unique counts all NaN angles as one value by default (equal_nan=True),
+    # which would drop every ray with a NaN angle but the first; keep them all
+    _, idx = np.unique(ds[first_angle], return_index=True, equal_nan=False)
     if len(idx) < len(ds[first_angle]):
         # todo:
         # if times have been calculated with wrong number of rays
         # (ODIM_H5, we would need to recalculate the times
         # how should we find out?
-        ds = ds.isel({first_angle: idx})
+        ds = ds.isel({first_angle: np.sort(idx)})
 
     return ds
 
@@ -182,6 +185,7 @@ def reindex_angle(
 ):
     """Reindex along first angle.
 
+    Duplicate rays are removed first, see :py:func:`remove_duplicate_rays`.
     Missing values will be filled by variable's ``_FillValue``.
 
     Parameters
@@ -230,7 +234,7 @@ def reindex_angle(
         dtype=ds[first_angle].dtype,
     )
 
-    ds = ds.sortby(first_angle)
+    ds = remove_duplicate_rays(ds).sortby(first_angle)
     ds = _reindex_angle(ds, ang, tolerance, method=method)
 
     # check secondary angle coordinate (no nan)
@@ -321,10 +325,14 @@ def extract_angle_parameters(ds):
     Returns
     -------
     angle_dict : dict
-        Dictionary with parameters. ``angle_res`` is always positive, the sweep
-        direction is ``direction`` (1 for clockwise or ascending, -1 for
-        counter-clockwise or descending). ``missing_rays`` and ``excess_rays``
-        compare the number of rays with ``expected_number_rays``.
+        Dictionary with parameters. The angle and time ranges, ``a1gate`` and the
+        ``*_are_unique`` checks describe all rays of ``ds``. The angle parameters
+        from ``uniform_angle_spacing`` on are estimated without duplicate rays,
+        see :py:func:`remove_duplicate_rays`. ``angle_res`` is always positive,
+        the sweep direction is ``direction`` (1 for clockwise or ascending, -1
+        for counter-clockwise or descending). ``missing_rays`` and
+        ``excess_rays`` compare the number of rays without duplicates with
+        ``expected_number_rays``.
     """
     angle_dict = {}
 
@@ -346,7 +354,9 @@ def extract_angle_parameters(ds):
     )
 
     # 3. get unique angles
-    unique_angles = np.unique(ds[first_angle])
+    # as in remove_duplicate_rays, rays with a NaN angle are not duplicates
+    # (np.unique counts all NaN as one value unless equal_nan=False)
+    unique_angles = np.unique(ds[first_angle], equal_nan=False)
 
     # check if azimuth can be sorted
     # check if time can be sorted
@@ -361,12 +371,16 @@ def extract_angle_parameters(ds):
     a1gate_val = ds.time.idxmin(first_angle).values
     angle_dict.update(a1gate_idx=a1gate_idx, a1gate_val=a1gate_val)
 
+    # duplicate rays would skew the angle parameters below
+    if not angles_are_unique:
+        ds = remove_duplicate_rays(ds)
+
     # 5. angle differences
     fdim = ds[first_angle]
     diff = fdim.diff(first_angle)
 
     # this captures different angle spacing
-    # catches also missing rays and double rays
+    # catches also missing rays
     # and other erroneous ray alignments which result in different first_angle values
 
     # 6. this finds the median of those diff-values which are over some quantile
